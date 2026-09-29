@@ -1,23 +1,67 @@
 const SAMPLE_RATE = 16000;
 const HISTORY_LIMIT = 30;
 
-const $ = (sel) => document.querySelector(sel);
+const MODELS = {
+  'onnx-community/whisper-tiny': 'Rápida',
+  'onnx-community/whisper-base': 'Equilibrada',
+  'onnx-community/whisper-small': 'Precisa',
+};
+
+const $ = (sel, root = document) => root.querySelector(sel);
 const els = {
+  back: $('#back'),
+  title: $('#title'),
+  openHistory: $('#open-history'),
+  openSettings: $('#open-settings'),
+  settings: $('#settings'),
   language: $('#language'),
-  model: $('#model'),
-  engine: $('#engine'),
+  summary: $('#summary'),
   drop: $('#drop'),
   file: $('#file'),
-  status: $('#status'),
-  statusText: $('#status-text'),
-  statusDetail: $('#status-detail'),
-  barFill: $('#bar-fill'),
+  job: $('#job'),
+  jobTitle: $('#job-title'),
+  jobDetail: $('#job-detail'),
+  jobPreview: $('#job-preview'),
+  progressFill: $('#progress-fill'),
   cancel: $('#cancel'),
   results: $('#results'),
+  viewHome: $('#view-home'),
+  viewHistory: $('#view-history'),
+  historySearch: $('#history-search'),
   historyList: $('#history-list'),
   historyEmpty: $('#history-empty'),
+  engine: $('#engine'),
+  engineDot: $('#engine-dot'),
+  toast: $('#toast'),
   tpl: $('#result-tpl'),
 };
+
+// ---------- Íconos (trazos estilo Lucide) ----------
+const ICONS = {
+  back: '<path d="m15 18-6-6 6-6"/>',
+  history: '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l3 2"/>',
+  sliders: '<path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/>',
+  upload: '<path d="M12 15V3m0 0-4 4m4-4 4 4"/><path d="M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4"/>',
+  x: '<path d="M18 6 6 18M6 6l12 12"/>',
+  search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
+  lock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
+  play: '<path d="M7 4.5v15a1 1 0 0 0 1.5.86l12.5-7.5a1 1 0 0 0 0-1.72L8.5 3.64A1 1 0 0 0 7 4.5z"/>',
+  pause: '<rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/>',
+  copy: '<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/>',
+  clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  trash: '<path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/>',
+  chevron: '<path d="m9 18 6-6-6-6"/>',
+};
+
+function icon(name) {
+  return `<svg class="i" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name]}</svg>`;
+}
+
+function hydrateIcons(root = document) {
+  root.querySelectorAll('i[data-icon]').forEach((el) => {
+    el.outerHTML = icon(el.dataset.icon);
+  });
+}
 
 // ---------- Almacenamiento (chrome.storage o localStorage si se abre como página) ----------
 const hasChromeStorage = typeof chrome !== 'undefined' && chrome.storage?.local;
@@ -39,6 +83,21 @@ const store = {
     try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
   },
 };
+
+// ---------- Ajustes ----------
+function selectedModel() {
+  return $('input[name="model"]:checked').value;
+}
+
+function updateSummary() {
+  const lang = els.language.selectedOptions[0].textContent.replace('Detectar automáticamente', 'Idioma automático');
+  els.summary.textContent = `${lang} · Calidad ${MODELS[selectedModel()].toLowerCase()}`;
+}
+
+function toggleSettings(open = els.settings.hidden) {
+  els.settings.hidden = !open;
+  els.openSettings.setAttribute('aria-expanded', String(open));
+}
 
 // ---------- Worker con el modelo ----------
 let worker = null;
@@ -85,18 +144,25 @@ function cancel() {
   worker = null;
   loadedModel = null;
   queue.length = 0;
+  cancelled = true;
   if (pending) {
     const p = pending;
     pending = null;
     p.reject(new Cancelled());
   }
-  cancelled = true;
+}
+
+function setEngine(device) {
+  const gpu = device === 'webgpu';
+  els.engine.textContent = gpu ? 'Placa de video' : 'Procesador';
+  els.engine.title = gpu ? 'WebGPU: rápido' : 'WebAssembly: más lento';
+  els.engineDot.className = `dot ${gpu ? 'gpu' : 'cpu'}`;
 }
 
 async function ensureModel(model) {
   if (loadedModel === model) return;
   const files = new Map();
-  showStatus('Descargando el modelo de IA…', 'Solo la primera vez. Después queda guardado.', 0);
+  showJob('Preparando el modelo de IA', 'Solo la primera vez', null);
   const { device } = await request({ type: 'load', model }, [], (ev) => {
     if (ev.type !== 'download') return;
     files.set(ev.file, ev);
@@ -106,16 +172,10 @@ async function ensureModel(model) {
       loaded += f.loaded;
       total += f.total;
     }
-    showStatus(
-      'Descargando el modelo de IA…',
-      `${formatMB(loaded)} de ${formatMB(total)} · solo la primera vez`,
-      total ? loaded / total : 0,
-    );
+    showJob('Descargando el modelo de IA', `${formatMB(loaded)} de ${formatMB(total)} · solo la primera vez`, total ? loaded / total : 0);
   });
   loadedModel = model;
-  els.engine.textContent = device === 'webgpu'
-    ? 'Motor: placa de video (WebGPU) · rápido'
-    : 'Motor: procesador (WebAssembly) · más lento';
+  setEngine(device);
 }
 
 // ---------- Audio ----------
@@ -143,15 +203,19 @@ let cancelled = false;
 
 function enqueue(files) {
   const list = [...files].filter((f) => f.type.startsWith('audio/') || f.type.startsWith('video/') || /\.(mp3|wav|m4a|aac|flac|ogg|opus|webm|mp4)$/i.test(f.name));
-  if (!list.length) return;
+  if (!list.length) {
+    toast('Ese archivo no parece ser un audio');
+    return;
+  }
   queue.push(...list);
+  toggleSettings(false);
   if (!busy) runQueue();
 }
 
 async function runQueue() {
   busy = true;
   cancelled = false;
-  els.drop.classList.add('disabled');
+  els.drop.classList.add('busy');
   while (queue.length && !cancelled) {
     const file = queue.shift();
     try {
@@ -163,13 +227,14 @@ async function runQueue() {
     }
   }
   busy = false;
-  els.drop.classList.remove('disabled');
-  hideStatus();
+  els.drop.classList.remove('busy');
+  els.job.hidden = true;
+  updateDropSize();
 }
 
 async function processFile(file) {
-  const pendingCount = queue.length ? ` (${queue.length} más en cola)` : '';
-  showStatus(`Leyendo ${file.name}…`, pendingCount.trim(), null);
+  const more = () => (queue.length ? ` · ${queue.length} en cola` : '');
+  showJob(file.name, `Leyendo el audio${more()}`, null);
 
   let audio;
   try {
@@ -180,21 +245,20 @@ async function processFile(file) {
   if (cancelled) throw new Cancelled();
   const duration = audio.length / SAMPLE_RATE;
 
-  const model = els.model.value;
+  const model = selectedModel();
   await ensureModel(model);
 
   const id = crypto.randomUUID();
   const language = els.language.value || null;
-  showStatus(`Transcribiendo ${file.name}`, 'Arrancando…', 0);
+  showJob(file.name, `Transcribiendo${more()}`, 0);
 
   const { segments } = await request({ type: 'transcribe', id, audio, language }, [audio.buffer], (ev) => {
     if (ev.type !== 'progress') return;
     const remaining = (ev.elapsed / ev.done) * (ev.total - ev.done);
-    showStatus(
-      `Transcribiendo ${file.name}`,
-      `Parte ${ev.done} de ${ev.total} · faltan ~${formatDuration(remaining)}${pendingCount}`,
-      ev.done / ev.total,
-    );
+    const eta = ev.done < ev.total ? ` · quedan ~${formatDuration(remaining)}` : '';
+    showJob(file.name, `${Math.round((ev.done / ev.total) * 100)} %${eta}${more()}`, ev.done / ev.total);
+    const last = ev.segments.slice(-3).map((s) => s.text).join(' ');
+    els.jobPreview.textContent = last;
   });
 
   const item = {
@@ -206,26 +270,42 @@ async function processFile(file) {
     model: model.split('/').pop(),
     segments,
   };
-  els.results.prepend(renderResult(item, { onRemove: (card) => card.remove() }));
+  const card = renderResult(item, {
+    audioUrl: URL.createObjectURL(file),
+    onRemove: (c) => {
+      c.remove();
+      updateDropSize();
+    },
+  });
+  els.results.prepend(card);
   await addToHistory(item);
 }
 
 // ---------- Estado ----------
-function showStatus(text, detail = '', progress = null) {
-  els.status.hidden = false;
-  els.statusText.textContent = text;
-  els.statusDetail.textContent = detail;
+function showJob(title, detail = '', progress = null) {
+  els.job.hidden = false;
+  els.jobTitle.textContent = title;
+  els.jobDetail.textContent = detail;
+  if (progress === 0 || progress == null) els.jobPreview.textContent = '';
   if (progress == null) {
-    els.barFill.classList.add('indeterminate');
-    els.barFill.style.width = '';
+    els.progressFill.classList.add('indeterminate');
+    els.progressFill.style.width = '';
   } else {
-    els.barFill.classList.remove('indeterminate');
-    els.barFill.style.width = `${Math.round(progress * 100)}%`;
+    els.progressFill.classList.remove('indeterminate');
+    els.progressFill.style.width = `${Math.round(progress * 100)}%`;
   }
 }
 
-function hideStatus() {
-  els.status.hidden = true;
+function updateDropSize() {
+  els.drop.classList.toggle('compact', els.results.children.length > 0);
+}
+
+let toastTimer;
+function toast(message) {
+  els.toast.textContent = message;
+  els.toast.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => (els.toast.hidden = true), 1800);
 }
 
 // ---------- Formato del texto ----------
@@ -237,10 +317,11 @@ function toParagraphs(segments) {
     const gap = s.start - prevEnd;
     const long = cur && cur.text.length > 250 && /[.?!…]$/.test(cur.text);
     if (!cur || gap > 1 || long) {
-      cur = { start: s.start, text: s.text };
+      cur = { start: s.start, end: s.end, text: s.text };
       paras.push(cur);
     } else {
       cur.text += ' ' + s.text;
+      cur.end = s.end;
     }
     prevEnd = s.end;
   }
@@ -269,6 +350,14 @@ function formatMB(bytes) {
   return `${Math.round(bytes / 1e6)} MB`;
 }
 
+function formatDate(iso) {
+  return new Date(iso).toLocaleString('es-AR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+}
+
+function wordCount(item) {
+  return item.segments.reduce((n, s) => n + s.text.split(/\s+/).filter(Boolean).length, 0);
+}
+
 function buildExport(item, format, withTimes) {
   const paras = toParagraphs(item.segments);
   if (format === 'srt') {
@@ -276,13 +365,12 @@ function buildExport(item, format, withTimes) {
       .map((s, i) => `${i + 1}\n${clock(s.start, true)} --> ${clock(Math.max(s.end, s.start + 0.5), true)}\n${s.text}\n`)
       .join('\n');
   }
-  const body = paras.map((p) => (withTimes ? `[${clock(p.start)}] ${p.text}` : p.text));
   if (format === 'md') {
     const date = new Date(item.date).toLocaleString('es-AR');
     const lines = paras.map((p) => (withTimes ? `**[${clock(p.start)}]** ${p.text}` : p.text));
     return `# ${item.name}\n\n_Transcripto el ${date} · duración ${clock(item.duration)}_\n\n${lines.join('\n\n')}\n`;
   }
-  return body.join('\n\n') + '\n';
+  return paras.map((p) => (withTimes ? `[${clock(p.start)}] ${p.text}` : p.text)).join('\n\n') + '\n';
 }
 
 function download(item, format, withTimes) {
@@ -294,63 +382,130 @@ function download(item, format, withTimes) {
   a.download = `${item.name.replace(/\.[^.]+$/, '')}.${format}`;
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+  toast(`Descargando ${format.toUpperCase()}`);
 }
 
 // ---------- Tarjetas de resultado ----------
-function renderResult(item, { onRemove }) {
+function renderResult(item, { audioUrl = null, onRemove }) {
   const card = els.tpl.content.firstElementChild.cloneNode(true);
-  const textEl = card.querySelector('.text');
-  const timesEl = card.querySelector('.show-times');
-  card.querySelector('.name').textContent = item.name;
-  const date = new Date(item.date).toLocaleString('es-AR', { dateStyle: 'short', timeStyle: 'short' });
-  const words = item.segments.reduce((n, s) => n + s.text.split(/\s+/).filter(Boolean).length, 0);
-  card.querySelector('.meta').textContent = `${clock(item.duration)} · ${words} palabras · ${date}`;
+  hydrateIcons(card);
+  const textEl = $('.text', card);
+  const timesBtn = $('.times', card);
 
-  const paint = () => {
-    textEl.replaceChildren();
-    const paras = toParagraphs(item.segments);
-    if (!paras.length) {
-      textEl.innerHTML = '<p class="empty">No se detectó voz en este audio.</p>';
-      return;
-    }
-    for (const p of paras) {
-      const el = document.createElement('p');
-      if (timesEl.checked) {
-        const ts = document.createElement('span');
-        ts.className = 'ts';
-        ts.textContent = clock(p.start);
-        el.append(ts);
-      }
-      el.append(p.text);
-      textEl.append(el);
-    }
-  };
-  timesEl.addEventListener('change', paint);
-  paint();
+  $('.name', card).textContent = item.name;
+  $('.name', card).title = item.name;
+  $('.meta', card).textContent = `${clock(item.duration)} · ${wordCount(item)} palabras · ${formatDate(item.date)}`;
 
-  const copyBtn = card.querySelector('.copy');
+  // Texto en párrafos, con marca de tiempo por párrafo.
+  const paras = toParagraphs(item.segments);
+  const paraEls = paras.map((p) => {
+    const el = document.createElement('p');
+    el.className = 'para';
+    const ts = document.createElement('span');
+    ts.className = 'ts';
+    ts.textContent = clock(p.start);
+    el.append(ts, p.text);
+    textEl.append(el);
+    return el;
+  });
+  if (!paras.length) textEl.innerHTML = '<p class="para no-speech">No se detectó voz en este audio.</p>';
+
+  let showTimes = false;
+  timesBtn.addEventListener('click', () => {
+    showTimes = !showTimes;
+    textEl.classList.toggle('show-times', showTimes);
+    timesBtn.setAttribute('aria-pressed', String(showTimes));
+  });
+
+  if (audioUrl) setupPlayer(card, audioUrl, paras, paraEls);
+
+  const copyBtn = $('.copy', card);
   copyBtn.addEventListener('click', async () => {
-    await navigator.clipboard.writeText(buildExport(item, 'txt', timesEl.checked).trim());
-    copyBtn.textContent = '¡Copiado!';
-    setTimeout(() => (copyBtn.textContent = 'Copiar'), 1500);
+    await navigator.clipboard.writeText(buildExport(item, 'txt', showTimes).trim());
+    toast('Texto copiado');
   });
   card.querySelectorAll('.dl').forEach((btn) =>
-    btn.addEventListener('click', () => download(item, btn.dataset.format, timesEl.checked)),
+    btn.addEventListener('click', () => download(item, btn.dataset.format, showTimes)),
   );
-  card.querySelector('.remove').addEventListener('click', () => onRemove(card));
+  $('.remove', card).addEventListener('click', () => {
+    card.dispatchEvent(new Event('dispose'));
+    onRemove(card);
+  });
   return card;
 }
 
+// Reproductor: sigue la lectura resaltando el párrafo y permite saltar con un clic.
+const players = new Set();
+
+function setupPlayer(card, url, paras, paraEls) {
+  const player = $('.player', card);
+  const playBtn = $('.play', card);
+  const seek = $('.seek', card);
+  const time = $('.time', card);
+  const audio = new Audio(url);
+  player.hidden = false;
+
+  const setPlayIcon = () => {
+    playBtn.innerHTML = icon(audio.paused ? 'play' : 'pause');
+    playBtn.title = audio.paused ? 'Reproducir' : 'Pausar';
+  };
+  setPlayIcon();
+
+  playBtn.addEventListener('click', () => (audio.paused ? audio.play() : audio.pause()));
+  players.add(audio);
+  audio.addEventListener('play', () => {
+    // Solo un audio sonando a la vez.
+    players.forEach((other) => other !== audio && other.pause());
+    setPlayIcon();
+  });
+  audio.addEventListener('pause', setPlayIcon);
+  audio.addEventListener('ended', setPlayIcon);
+
+  let active = -1;
+  audio.addEventListener('timeupdate', () => {
+    const t = audio.currentTime;
+    if (audio.duration) seek.value = String(Math.round((t / audio.duration) * 1000));
+    time.textContent = clock(t);
+    let idx = -1;
+    for (let i = 0; i < paras.length && paras[i].start <= t + 0.05; i++) idx = i;
+    if (idx !== active) {
+      paraEls[active]?.classList.remove('active');
+      paraEls[idx]?.classList.add('active');
+      if (!audio.paused) paraEls[idx]?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      active = idx;
+    }
+  });
+  seek.addEventListener('input', () => {
+    if (audio.duration) audio.currentTime = (Number(seek.value) / 1000) * audio.duration;
+  });
+
+  card.addEventListener('dispose', () => {
+    audio.pause();
+    players.delete(audio);
+    URL.revokeObjectURL(url);
+  });
+
+  paraEls.forEach((el, i) => {
+    el.classList.add('seekable');
+    el.title = `Reproducir desde ${clock(paras[i].start)}`;
+    el.addEventListener('click', () => {
+      if (getSelection().toString()) return; // no interrumpir si está seleccionando texto
+      audio.currentTime = paras[i].start;
+      audio.play();
+    });
+  });
+}
+
 function renderError(name, message) {
-  const card = document.createElement('article');
-  card.className = 'card';
+  const card = document.createElement('div');
+  card.className = 'error-card';
   const title = document.createElement('strong');
   title.textContent = name;
   const msg = document.createElement('p');
-  msg.className = 'error';
   msg.textContent = message;
   card.append(title, msg);
   els.results.prepend(card);
+  updateDropSize();
 }
 
 // ---------- Historial ----------
@@ -360,33 +515,79 @@ async function addToHistory(item) {
   await store.set('history', history.slice(0, HISTORY_LIMIT));
 }
 
-async function showHistory() {
+async function removeFromHistory(id) {
   const history = await store.get('history', []);
+  await store.set('history', history.filter((x) => x.id !== id));
+}
+
+async function renderHistory() {
+  const history = await store.get('history', []);
+  const q = els.historySearch.value.trim().toLowerCase();
+  const items = q
+    ? history.filter((h) => h.name.toLowerCase().includes(q) || h.segments.some((s) => s.text.toLowerCase().includes(q)))
+    : history;
+
   els.historyList.replaceChildren(
-    ...history.map((item) =>
-      renderResult(item, {
-        onRemove: async (card) => {
-          card.remove();
-          const h = await store.get('history', []);
-          await store.set('history', h.filter((x) => x.id !== item.id));
-          els.historyEmpty.hidden = els.historyList.children.length > 0;
-        },
-      }),
-    ),
+    ...items.map((item) => {
+      const details = document.createElement('details');
+      details.className = 'hist';
+      const summary = document.createElement('summary');
+      const info = document.createElement('div');
+      info.className = 'hist-info';
+      const name = document.createElement('strong');
+      name.textContent = item.name;
+      const meta = document.createElement('span');
+      meta.textContent = `${formatDate(item.date)} · ${clock(item.duration)} · ${wordCount(item)} palabras`;
+      info.append(name, meta);
+      const del = document.createElement('button');
+      del.className = 'icon-btn sm';
+      del.title = 'Borrar del historial';
+      del.innerHTML = icon('trash');
+      del.addEventListener('click', async (e) => {
+        e.preventDefault();
+        details.remove();
+        await removeFromHistory(item.id);
+        els.historyEmpty.hidden = els.historyList.children.length > 0;
+        toast('Borrado del historial');
+      });
+      summary.innerHTML = `<span class="chev">${icon('chevron')}</span>`;
+      summary.append(info, del);
+      details.append(summary);
+      details.addEventListener('toggle', () => {
+        if (details.open && details.children.length === 1) {
+          details.append(renderResult(item, { onRemove: () => {} }));
+        }
+      }, { once: false });
+      return details;
+    }),
   );
-  els.historyEmpty.hidden = history.length > 0;
+  els.historyEmpty.textContent = q ? 'No hay resultados para esa búsqueda.' : 'No hay transcripciones guardadas.';
+  els.historyEmpty.hidden = items.length > 0;
+}
+
+function showView(view) {
+  const history = view === 'history';
+  els.viewHome.hidden = history;
+  els.viewHistory.hidden = !history;
+  els.back.hidden = !history;
+  els.openHistory.hidden = history;
+  els.openSettings.hidden = history;
+  els.title.textContent = history ? 'Historial' : 'Audio a Texto';
+  if (history) {
+    toggleSettings(false);
+    els.historySearch.value = '';
+    renderHistory();
+  }
 }
 
 // ---------- Eventos ----------
-document.querySelectorAll('.tab').forEach((tab) =>
-  tab.addEventListener('click', () => {
-    document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t === tab));
-    const view = tab.dataset.view;
-    $('#view-transcribe').hidden = view !== 'transcribe';
-    $('#view-history').hidden = view !== 'history';
-    if (view === 'history') showHistory();
-  }),
-);
+hydrateIcons();
+
+els.openSettings.addEventListener('click', () => toggleSettings());
+els.summary.addEventListener('click', () => toggleSettings(true));
+els.openHistory.addEventListener('click', () => showView('history'));
+els.back.addEventListener('click', () => showView('home'));
+els.historySearch.addEventListener('input', renderHistory);
 
 els.file.addEventListener('change', () => {
   enqueue(els.file.files);
@@ -398,22 +599,40 @@ els.file.addEventListener('change', () => {
     els.drop.classList.add('over');
   }),
 );
-['dragleave', 'drop'].forEach((t) =>
-  els.drop.addEventListener(t, () => els.drop.classList.remove('over')),
-);
+['dragleave', 'drop'].forEach((t) => els.drop.addEventListener(t, () => els.drop.classList.remove('over')));
 els.drop.addEventListener('drop', (e) => {
   e.preventDefault();
+  e.stopPropagation();
   enqueue(e.dataTransfer.files);
 });
 // Evita que soltar un archivo fuera de la zona lo abra en el panel.
 window.addEventListener('dragover', (e) => e.preventDefault());
-window.addEventListener('drop', (e) => e.preventDefault());
+window.addEventListener('drop', (e) => {
+  e.preventDefault();
+  if (!els.viewHome.hidden && !busy) enqueue(e.dataTransfer.files);
+});
 
-els.cancel.addEventListener('click', cancel);
+els.cancel.addEventListener('click', () => {
+  cancel();
+  toast('Transcripción cancelada');
+});
 
-for (const key of ['language', 'model']) {
-  store.get(key, null).then((v) => {
-    if (v != null) els[key].value = v;
-  });
-  els[key].addEventListener('change', () => store.set(key, els[key].value));
-}
+// Preferencias guardadas.
+(async () => {
+  const [lang, model] = await Promise.all([store.get('language', null), store.get('model', null)]);
+  if (lang != null) els.language.value = lang;
+  const radio = model && $(`input[name="model"][value="${model}"]`);
+  if (radio) radio.checked = true;
+  updateSummary();
+})();
+els.language.addEventListener('change', () => {
+  store.set('language', els.language.value);
+  updateSummary();
+});
+document.querySelectorAll('input[name="model"]').forEach((r) =>
+  r.addEventListener('change', () => {
+    store.set('model', selectedModel());
+    updateSummary();
+  }),
+);
+updateSummary();

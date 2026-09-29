@@ -7,92 +7,110 @@
   <link rel="stylesheet" href="sidepanel.css">
 </head>
 <body>
-  <header class="top">
+  <header class="bar">
+    <button id="back" class="icon-btn" title="Volver" hidden><i data-icon="back"></i></button>
     <div class="brand">
-      <img src="icons/icon32.png" alt="" width="20" height="20">
-      <span>Audio a Texto</span>
+      <img src="icons/icon32.png" alt="" width="18" height="18">
+      <span id="title">Audio a Texto</span>
     </div>
-    <nav class="tabs" role="tablist">
-      <button class="tab active" data-view="transcribe" role="tab">Transcribir</button>
-      <button class="tab" data-view="history" role="tab">Historial</button>
-    </nav>
+    <div class="bar-actions">
+      <button id="open-history" class="icon-btn" title="Historial"><i data-icon="history"></i></button>
+      <button id="open-settings" class="icon-btn" title="Ajustes" aria-expanded="false"><i data-icon="sliders"></i></button>
+    </div>
   </header>
 
-  <main>
-    <section id="view-transcribe" class="view">
-      <div class="card settings">
-        <label class="field">
-          <span>Idioma del audio</span>
-          <select id="language">
-            <option value="">Detectar automáticamente</option>
-            <option value="es" selected>Español</option>
-            <option value="en">Inglés</option>
-            <option value="pt">Portugués</option>
-            <option value="fr">Francés</option>
-            <option value="it">Italiano</option>
-            <option value="de">Alemán</option>
-          </select>
-        </label>
-        <label class="field">
-          <span>Calidad</span>
-          <select id="model">
-            <option value="onnx-community/whisper-tiny">Rápida · descarga ~120 MB</option>
-            <option value="onnx-community/whisper-base" selected>Equilibrada · descarga ~210 MB</option>
-            <option value="onnx-community/whisper-small">Precisa · descarga ~590 MB</option>
-          </select>
-        </label>
-        <p class="engine" id="engine">Motor: sin cargar</p>
+  <div id="settings" class="sheet" hidden>
+    <div class="sheet-row">
+      <span class="label">Idioma</span>
+      <select id="language">
+        <option value="">Detectar automáticamente</option>
+        <option value="es" selected>Español</option>
+        <option value="en">Inglés</option>
+        <option value="pt">Portugués</option>
+        <option value="fr">Francés</option>
+        <option value="it">Italiano</option>
+        <option value="de">Alemán</option>
+      </select>
+    </div>
+    <div class="sheet-row">
+      <span class="label">Calidad</span>
+      <div class="segmented" id="model" role="radiogroup">
+        <label><input type="radio" name="model" value="onnx-community/whisper-tiny"><span>Rápida<small>120 MB</small></span></label>
+        <label><input type="radio" name="model" value="onnx-community/whisper-base" checked><span>Equilibrada<small>210 MB</small></span></label>
+        <label><input type="radio" name="model" value="onnx-community/whisper-small"><span>Precisa<small>590 MB</small></span></label>
       </div>
+      <p class="hint">El modelo se descarga una sola vez y queda guardado en el navegador.</p>
+    </div>
+  </div>
 
+  <main>
+    <section id="view-home" class="view">
       <label class="drop" id="drop">
         <input type="file" id="file" accept="audio/*,video/*,.mp3,.wav,.m4a,.aac,.flac,.ogg,.opus,.webm,.mp4" multiple hidden>
-        <svg viewBox="0 0 24 24" width="28" height="28" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M12 16V4m0 0-4 4m4-4 4 4M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
-        <strong>Arrastrá tus audios acá</strong>
-        <span>o <u>elegí archivos</u></span>
-        <small>MP3 · WAV · M4A · AAC · FLAC · OGG · OPUS · WEBM · MP4</small>
+        <span class="drop-icon"><i data-icon="upload"></i></span>
+        <span class="drop-title">Soltá un audio o <u>elegí archivos</u></span>
+        <span class="drop-sub">MP3, WAV, M4A, OGG, FLAC, WEBM o MP4</span>
       </label>
+      <button id="summary" class="summary" type="button"></button>
 
-      <div id="status" class="card status" hidden>
-        <div class="status-row">
-          <span id="status-text">Preparando…</span>
-          <button id="cancel" class="link">Cancelar</button>
+      <div id="job" class="job" hidden>
+        <div class="job-head">
+          <div class="job-info">
+            <strong id="job-title"></strong>
+            <span id="job-detail"></span>
+          </div>
+          <button id="cancel" class="icon-btn sm" title="Cancelar"><i data-icon="x"></i></button>
         </div>
-        <div class="bar"><div id="bar-fill"></div></div>
-        <small id="status-detail"></small>
+        <div class="progress"><div id="progress-fill"></div></div>
+        <p id="job-preview" class="job-preview"></p>
       </div>
 
-      <div id="results"></div>
-
-      <p class="privacy">
-        <svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" d="M6 10V8a6 6 0 1 1 12 0v2M5 10h14v10H5z"/></svg>
-        El audio se procesa en tu computadora. No se sube a ningún servidor.
-      </p>
+      <div id="results" class="stack"></div>
     </section>
 
     <section id="view-history" class="view" hidden>
-      <div id="history-list"></div>
-      <p id="history-empty" class="empty">Todavía no hay transcripciones guardadas.</p>
+      <label class="search">
+        <i data-icon="search"></i>
+        <input id="history-search" type="search" placeholder="Buscar en transcripciones">
+      </label>
+      <div id="history-list" class="stack"></div>
+      <p id="history-empty" class="empty" hidden>No hay transcripciones guardadas.</p>
     </section>
   </main>
 
+  <footer class="foot">
+    <span id="engine-dot" class="dot"></span>
+    <span id="engine">Motor sin cargar</span>
+    <span class="sep">·</span>
+    <i data-icon="lock"></i>
+    <span>Todo se procesa en tu equipo</span>
+  </footer>
+
+  <div id="toast" class="toast" role="status" hidden></div>
+
   <template id="result-tpl">
-    <article class="card result">
-      <header>
-        <div>
+    <article class="result">
+      <header class="result-head">
+        <div class="result-title">
           <h3 class="name"></h3>
-          <small class="meta"></small>
+          <span class="meta"></span>
         </div>
-        <button class="link remove" title="Quitar">✕</button>
+        <button class="icon-btn sm remove" title="Quitar"><i data-icon="x"></i></button>
       </header>
-      <div class="toggle">
-        <label><input type="checkbox" class="show-times"> Mostrar marcas de tiempo</label>
+      <div class="player" hidden>
+        <button class="play" title="Reproducir"><i data-icon="play"></i></button>
+        <input class="seek" type="range" min="0" max="1000" value="0" aria-label="Posición">
+        <span class="time">00:00</span>
       </div>
-      <div class="text" tabindex="0"></div>
-      <footer>
-        <button class="btn primary copy">Copiar</button>
-        <button class="btn dl" data-format="txt">TXT</button>
-        <button class="btn dl" data-format="srt">SRT</button>
-        <button class="btn dl" data-format="md">Markdown</button>
+      <div class="text"></div>
+      <footer class="result-actions">
+        <button class="btn primary copy"><i data-icon="copy"></i>Copiar</button>
+        <div class="group" role="group" aria-label="Descargar">
+          <button class="btn dl" data-format="txt" title="Texto plano">TXT</button>
+          <button class="btn dl" data-format="srt" title="Subtítulos">SRT</button>
+          <button class="btn dl" data-format="md" title="Markdown">MD</button>
+        </div>
+        <button class="icon-btn times" title="Mostrar marcas de tiempo" aria-pressed="false"><i data-icon="clock"></i></button>
       </footer>
     </article>
   </template>
