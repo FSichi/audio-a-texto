@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Audio a Texto</title>
+  <link rel="stylesheet" href="sidepanel.css">
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <img src="icons/icon32.png" alt="" width="20" height="20">
+      <span>Audio a Texto</span>
+    </div>
+    <nav class="tabs" role="tablist">
+      <button class="tab active" data-view="transcribe" role="tab">Transcribir</button>
+      <button class="tab" data-view="history" role="tab">Historial</button>
+    </nav>
+  </header>
+
+  <main>
+    <section id="view-transcribe" class="view">
+      <div class="card settings">
+        <label class="field">
+          <span>Idioma del audio</span>
+          <select id="language">
+            <option value="">Detectar automáticamente</option>
+            <option value="es" selected>Español</option>
+            <option value="en">Inglés</option>
+            <option value="pt">Portugués</option>
+            <option value="fr">Francés</option>
+            <option value="it">Italiano</option>
+            <option value="de">Alemán</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>Calidad</span>
+          <select id="model">
+            <option value="onnx-community/whisper-tiny">Rápida · descarga ~120 MB</option>
+            <option value="onnx-community/whisper-base" selected>Equilibrada · descarga ~210 MB</option>
+            <option value="onnx-community/whisper-small">Precisa · descarga ~590 MB</option>
+          </select>
+        </label>
+        <p class="engine" id="engine">Motor: sin cargar</p>
+      </div>
+
+      <label class="drop" id="drop">
+        <input type="file" id="file" accept="audio/*,video/*,.mp3,.wav,.m4a,.aac,.flac,.ogg,.opus,.webm,.mp4" multiple hidden>
+        <svg viewBox="0 0 24 24" width="28" height="28" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M12 16V4m0 0-4 4m4-4 4 4M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
+        <strong>Arrastrá tus audios acá</strong>
+        <span>o <u>elegí archivos</u></span>
+        <small>MP3 · WAV · M4A · AAC · FLAC · OGG · OPUS · WEBM · MP4</small>
+      </label>
+
+      <div id="status" class="card status" hidden>
+        <div class="status-row">
+          <span id="status-text">Preparando…</span>
+          <button id="cancel" class="link">Cancelar</button>
+        </div>
+        <div class="bar"><div id="bar-fill"></div></div>
+        <small id="status-detail"></small>
+      </div>
+
+      <div id="results"></div>
+
+      <p class="privacy">
+        <svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" d="M6 10V8a6 6 0 1 1 12 0v2M5 10h14v10H5z"/></svg>
+        El audio se procesa en tu computadora. No se sube a ningún servidor.
+      </p>
+    </section>
+
+    <section id="view-history" class="view" hidden>
+      <div id="history-list"></div>
+      <p id="history-empty" class="empty">Todavía no hay transcripciones guardadas.</p>
+    </section>
+  </main>
+
+  <template id="result-tpl">
+    <article class="card result">
+      <header>
+        <div>
+          <h3 class="name"></h3>
+          <small class="meta"></small>
+        </div>
+        <button class="link remove" title="Quitar">✕</button>
+      </header>
+      <div class="toggle">
+        <label><input type="checkbox" class="show-times"> Mostrar marcas de tiempo</label>
+      </div>
+      <div class="text" tabindex="0"></div>
+      <footer>
+        <button class="btn primary copy">Copiar</button>
+        <button class="btn dl" data-format="txt">TXT</button>
+        <button class="btn dl" data-format="srt">SRT</button>
+        <button class="btn dl" data-format="md">Markdown</button>
+      </footer>
+    </article>
+  </template>
+
+  <script type="module" src="sidepanel.js"></script>
+</body>
+</html>

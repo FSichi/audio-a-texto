@@ -1,0 +1,30 @@
+{
+  "manifest_version": 3,
+  "name": "Audio a Texto",
+  "version": "0.1.0",
+  "description": "Transcribí archivos de audio a texto dentro de Chrome, con IA que corre en tu computadora. Exportá a TXT, SRT o Markdown.",
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "action": {
+    "default_title": "Abrir Audio a Texto",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png"
+    }
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "permissions": ["sidePanel", "storage", "unlimitedStorage"],
+  "host_permissions": ["https://huggingface.co/*", "https://*.hf.co/*"],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
+  }
+}

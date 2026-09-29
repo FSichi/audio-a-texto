@@ -1,0 +1,13 @@
+# Sistema
+.DS_Store
+Thumbs.db
+
+# Dependencias y builds
+node_modules/
+dist/
+*.zip
+*.crx
+*.pem
+
+# Entorno
+.env*
