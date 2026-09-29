@@ -116,7 +116,8 @@ select {
 }
 select:focus-visible, input:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
-.segmented { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; padding: 3px; background: var(--subtle); border-radius: 9px; }
+.segmented { display: grid; grid-template-columns: repeat(2, 1fr); gap: 3px; padding: 3px; background: var(--subtle); border-radius: 9px; }
+.segmented label.disabled span { opacity: .45; cursor: not-allowed; }
 .segmented input { position: absolute; opacity: 0; pointer-events: none; }
 .segmented span {
   display: grid;
@@ -130,6 +131,20 @@ select:focus-visible, input:focus-visible, button:focus-visible { outline: 2px s
 .segmented small { font-size: 11px; color: var(--faint); font-weight: 400; }
 .segmented input:checked + span { background: var(--surface); box-shadow: var(--shadow), 0 0 0 1px var(--border); }
 .segmented input:focus-visible + span { outline: 2px solid var(--accent); }
+
+.row-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.row-head .hint { margin: 0; }
+.model-list { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.model-list li { display: flex; align-items: center; gap: 8px; min-height: 32px; padding: 0 4px 0 10px; border-radius: 8px; background: var(--subtle); }
+.model-list li span:first-child { flex: 1; }
+.model-list li .size { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.model-list .none { color: var(--faint); font-size: 12.5px; background: none; padding: 0; }
+.danger-actions { display: flex; gap: 6px; }
+.btn.subtle { color: var(--muted); }
+.btn.subtle:hover { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, var(--border)); background: var(--surface); }
+.btn.confirm { color: #fff; background: var(--danger); border-color: var(--danger); }
+.btn.confirm:hover { color: #fff; background: var(--danger); opacity: .9; }
+.btn:disabled { opacity: .5; pointer-events: none; }
 
 /* ---------- Contenido ---------- */
 main { flex: 1; padding: 14px; }
@@ -157,6 +172,44 @@ main { flex: 1; padding: 14px; }
 .drop.compact { grid-template-columns: auto 1fr; justify-items: start; align-items: center; column-gap: 12px; padding: 12px 14px; text-align: left; }
 .drop.compact .drop-icon { grid-row: span 2; width: 34px; height: 34px; margin: 0; }
 .drop.busy { opacity: .5; pointer-events: none; }
+
+/* ---------- Grabación de pestaña ---------- */
+.record-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 38px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  font-weight: 500;
+  cursor: pointer;
+  transition: border-color .15s, background .15s;
+}
+.record-btn:hover { border-color: var(--danger); }
+.rec-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--danger); flex: none; }
+.rec-dot.live { animation: pulse 1.4s ease-in-out infinite; }
+@keyframes pulse { 0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--danger) 55%, transparent); } 50% { box-shadow: 0 0 0 6px transparent; } }
+
+.recorder {
+  display: grid;
+  gap: 12px;
+  padding: 12px 14px;
+  background: var(--surface);
+  border: 1px solid color-mix(in srgb, var(--danger) 35%, var(--border));
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  animation: drop-in .18s ease-out;
+}
+.rec-head { display: flex; align-items: center; gap: 10px; }
+.rec-info { display: grid; flex: 1; min-width: 0; }
+.rec-info strong { font-weight: 600; }
+.rec-info span { font-size: 12px; color: var(--muted); }
+.rec-time { font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
+.rec-level { display: flex; align-items: center; gap: 2px; height: 28px; }
+.rec-level i { flex: 1; min-height: 2px; border-radius: 2px; background: var(--danger); opacity: .75; transition: height .08s linear; }
+.rec-actions { display: flex; justify-content: flex-end; gap: 6px; }
 
 .summary {
   align-self: center;

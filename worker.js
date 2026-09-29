@@ -1,5 +1,6 @@
 // Worker que corre Whisper (transformers.js) fuera del hilo de la interfaz.
 import { pipeline, env } from './lib/transformers.min.js';
+import { opfsCache } from './model-store.js';
 
 const SAMPLE_RATE = 16000;
 // Whisper procesa ventanas de hasta 30 s. Cortamos cada ~28 s en el punto más silencioso.
@@ -10,6 +11,10 @@ const SILENCE_RMS = 0.004;
 // Chrome no permite cargar código remoto en extensiones: el motor WASM va incluido en /lib.
 env.allowLocalModels = false;
 env.useWasmCache = false;
+// Los modelos se guardan en OPFS (ver model-store.js), no en la Cache Storage.
+env.useBrowserCache = false;
+env.useCustomCache = true;
+env.customCache = opfsCache;
 env.backends.onnx.wasm.wasmPaths = {
   mjs: new URL('./lib/ort-wasm-simd-threaded.asyncify.mjs', import.meta.url).href,
   wasm: new URL('./lib/ort-wasm-simd-threaded.asyncify.wasm', import.meta.url).href,
@@ -22,29 +27,49 @@ let transcriber = null;
 let loadedKey = null;
 let webgpuFailed = false;
 
-async function hasWebGPU() {
-  if (webgpuFailed) return false;
+// Modelos que solo corren en placa de video con soporte de media precisión (fp16).
+const GPU_ONLY = {
+  'onnx-community/whisper-large-v3-turbo': { encoder_model: 'fp16', decoder_model_merged: 'q4f16' },
+};
+
+async function getAdapter() {
+  if (webgpuFailed) return null;
   try {
-    return !!(navigator.gpu && (await navigator.gpu.requestAdapter()));
+    return (navigator.gpu && (await navigator.gpu.requestAdapter())) || null;
   } catch {
-    return false;
+    return null;
   }
 }
 
 async function load(model) {
-  const webgpu = await hasWebGPU();
+  const adapter = await getAdapter();
+  const webgpu = !!adapter;
   const device = webgpu ? 'webgpu' : 'wasm';
   const key = `${model}|${device}`;
   if (transcriber && loadedKey === key) return device;
 
   if (transcriber) await transcriber.dispose?.();
   transcriber = null;
+  loadedKey = null;
 
   const progress_callback = (p) => {
     if (p.status === 'progress' && p.total) {
       post({ type: 'download', file: p.file, loaded: p.loaded, total: p.total });
     }
   };
+
+  if (GPU_ONLY[model]) {
+    if (!adapter?.features.has('shader-f16')) {
+      throw new Error('La calidad Máxima necesita una placa de video compatible. Elegí otra calidad en Ajustes.');
+    }
+    transcriber = await pipeline('automatic-speech-recognition', model, {
+      device: 'webgpu',
+      dtype: GPU_ONLY[model],
+      progress_callback,
+    });
+    loadedKey = key;
+    return 'webgpu';
+  }
 
   const dtype = {
     encoder_model: 'fp32',
@@ -149,6 +174,14 @@ function post(msg) {
   self.postMessage(msg);
 }
 
+function errorMessage(err) {
+  const msg = err?.message || String(err);
+  if (err instanceof RangeError || /allocation failed|out of memory|OOM/i.test(msg)) {
+    return 'No hay memoria suficiente para este modelo. Cerrá otras pestañas o elegí una calidad menor.';
+  }
+  return msg;
+}
+
 self.addEventListener('message', async ({ data }) => {
   try {
     if (data.type === 'load') {
@@ -158,6 +191,13 @@ self.addEventListener('message', async ({ data }) => {
       await transcribe(data);
     }
   } catch (err) {
-    post({ type: 'error', id: data.id, message: err?.message || String(err) });
+    post({ type: 'error', id: data.id, message: errorMessage(err) });
   }
+});
+
+// Errores que ocurren fuera de nuestras promesas (dentro del motor) también deben llegar al panel,
+// si no, la interfaz queda esperando para siempre.
+self.addEventListener('unhandledrejection', (e) => {
+  e.preventDefault();
+  post({ type: 'error', message: errorMessage(e.reason) });
 });

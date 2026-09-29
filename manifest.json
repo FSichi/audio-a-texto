@@ -22,7 +22,7 @@
   "side_panel": {
     "default_path": "sidepanel.html"
   },
-  "permissions": ["sidePanel", "storage", "unlimitedStorage"],
+  "permissions": ["sidePanel", "storage", "unlimitedStorage", "tabCapture"],
   "host_permissions": ["https://huggingface.co/*", "https://*.hf.co/*"],
   "content_security_policy": {
     "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"

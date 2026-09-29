@@ -38,8 +38,20 @@
         <label><input type="radio" name="model" value="onnx-community/whisper-tiny"><span>Rápida<small>120 MB</small></span></label>
         <label><input type="radio" name="model" value="onnx-community/whisper-base" checked><span>Equilibrada<small>210 MB</small></span></label>
         <label><input type="radio" name="model" value="onnx-community/whisper-small"><span>Precisa<small>590 MB</small></span></label>
+        <label id="opt-max"><input type="radio" name="model" value="onnx-community/whisper-large-v3-turbo"><span>Máxima<small id="max-note">1,5 GB · con GPU</small></span></label>
       </div>
-      <p class="hint">El modelo se descarga una sola vez y queda guardado en el navegador.</p>
+      <p class="hint">Cada modelo se descarga una sola vez y queda guardado en el navegador.</p>
+    </div>
+    <div class="sheet-row">
+      <div class="row-head">
+        <span class="label">Almacenamiento</span>
+        <span id="storage-total" class="hint"></span>
+      </div>
+      <ul id="model-list" class="model-list"></ul>
+      <div class="danger-actions">
+        <button id="clear-models" class="btn subtle" type="button"><i data-icon="trash"></i>Borrar modelos</button>
+        <button id="clear-history" class="btn subtle" type="button"><i data-icon="trash"></i>Borrar historial</button>
+      </div>
     </div>
   </div>
 
@@ -51,6 +63,27 @@
         <span class="drop-title">Soltá un audio o <u>elegí archivos</u></span>
         <span class="drop-sub">MP3, WAV, M4A, OGG, FLAC, WEBM o MP4</span>
       </label>
+      <button id="record" class="record-btn" type="button">
+        <span class="rec-dot"></span>
+        Grabar el audio de esta pestaña
+      </button>
+
+      <div id="recorder" class="recorder" hidden>
+        <div class="rec-head">
+          <span class="rec-dot live"></span>
+          <div class="rec-info">
+            <strong>Grabando la pestaña</strong>
+            <span>No cierres este panel mientras grabás</span>
+          </div>
+          <span id="rec-time" class="rec-time">00:00</span>
+        </div>
+        <div id="rec-level" class="rec-level" aria-hidden="true"></div>
+        <div class="rec-actions">
+          <button id="rec-discard" class="btn" type="button">Descartar</button>
+          <button id="rec-stop" class="btn primary" type="button"><i data-icon="stop"></i>Detener y transcribir</button>
+        </div>
+      </div>
+
       <button id="summary" class="summary" type="button"></button>
 
       <div id="job" class="job" hidden>

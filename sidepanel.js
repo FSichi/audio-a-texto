@@ -1,3 +1,5 @@
+import { listModels, deleteModel as removeModel, clearModels } from './model-store.js';
+
 const SAMPLE_RATE = 16000;
 const HISTORY_LIMIT = 30;
 
@@ -5,7 +7,11 @@ const MODELS = {
   'onnx-community/whisper-tiny': 'Rápida',
   'onnx-community/whisper-base': 'Equilibrada',
   'onnx-community/whisper-small': 'Precisa',
+  'onnx-community/whisper-large-v3-turbo': 'Máxima',
 };
+const DEFAULT_MODEL = 'onnx-community/whisper-base';
+// Tamaño conocido de descarga: los archivos se piden de a uno y sin esto la barra "retrocede".
+const DOWNLOAD_BYTES = { 'onnx-community/whisper-large-v3-turbo': 1.47e9 };
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const els = {
@@ -34,6 +40,18 @@ const els = {
   engineDot: $('#engine-dot'),
   toast: $('#toast'),
   tpl: $('#result-tpl'),
+  optMax: $('#opt-max'),
+  maxNote: $('#max-note'),
+  storageTotal: $('#storage-total'),
+  modelList: $('#model-list'),
+  clearModels: $('#clear-models'),
+  clearHistory: $('#clear-history'),
+  record: $('#record'),
+  recorder: $('#recorder'),
+  recTime: $('#rec-time'),
+  recLevel: $('#rec-level'),
+  recStop: $('#rec-stop'),
+  recDiscard: $('#rec-discard'),
 };
 
 // ---------- Íconos (trazos estilo Lucide) ----------
@@ -51,6 +69,7 @@ const ICONS = {
   clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
   trash: '<path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/>',
   chevron: '<path d="m9 18 6-6-6-6"/>',
+  stop: '<rect x="6" y="6" width="12" height="12" rx="2"/>',
 };
 
 function icon(name) {
@@ -97,6 +116,26 @@ function updateSummary() {
 function toggleSettings(open = els.settings.hidden) {
   els.settings.hidden = !open;
   els.openSettings.setAttribute('aria-expanded', String(open));
+  if (open) renderStorage();
+}
+
+// La calidad Máxima (large-v3-turbo) solo corre en placas de video con fp16.
+async function checkMaxSupport() {
+  let ok = false;
+  try {
+    const adapter = await navigator.gpu?.requestAdapter();
+    ok = !!adapter?.features.has('shader-f16');
+  } catch {}
+  if (ok) return;
+  const radio = $('input', els.optMax);
+  radio.disabled = true;
+  els.optMax.classList.add('disabled');
+  els.optMax.title = 'Tu placa de video no es compatible con esta calidad';
+  els.maxNote.textContent = 'No disponible aquí';
+  if (radio.checked) {
+    $(`input[name="model"][value="${DEFAULT_MODEL}"]`).checked = true;
+    updateSummary();
+  }
 }
 
 // ---------- Worker con el modelo ----------
@@ -162,7 +201,9 @@ function setEngine(device) {
 async function ensureModel(model) {
   if (loadedModel === model) return;
   const files = new Map();
-  showJob('Preparando el modelo de IA', 'Solo la primera vez', null);
+  // Si ya está en disco, los eventos de progreso son de lectura, no de descarga.
+  const downloaded = (await listModels()).has(model);
+  showJob('Preparando el modelo de IA', downloaded ? 'Cargándolo desde el disco…' : 'Solo la primera vez', null);
   const { device } = await request({ type: 'load', model }, [], (ev) => {
     if (ev.type !== 'download') return;
     files.set(ev.file, ev);
@@ -172,7 +213,15 @@ async function ensureModel(model) {
       loaded += f.loaded;
       total += f.total;
     }
-    showJob('Descargando el modelo de IA', `${formatMB(loaded)} de ${formatMB(total)} · solo la primera vez`, total ? loaded / total : 0);
+    total = Math.max(total, DOWNLOAD_BYTES[model] ?? 0);
+    if (loaded >= total * 0.995) {
+      // Archivos listos: falta cargarlo en memoria, que en modelos grandes lleva unos segundos.
+      showJob('Preparando el modelo de IA', 'Cargándolo en memoria…', null);
+    } else if (downloaded) {
+      showJob('Cargando el modelo de IA', `${Math.round((loaded / total) * 100)} %`, loaded / total);
+    } else {
+      showJob('Descargando el modelo de IA', `${formatSize(loaded)} de ${formatSize(total)} · solo la primera vez`, loaded / total);
+    }
   });
   loadedModel = model;
   setEngine(device);
@@ -346,10 +395,6 @@ function formatDuration(sec) {
   return s ? `${m} min ${s} s` : `${m} min`;
 }
 
-function formatMB(bytes) {
-  return `${Math.round(bytes / 1e6)} MB`;
-}
-
 function formatDate(iso) {
   return new Date(iso).toLocaleString('es-AR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 }
@@ -417,7 +462,7 @@ function renderResult(item, { audioUrl = null, onRemove }) {
     timesBtn.setAttribute('aria-pressed', String(showTimes));
   });
 
-  if (audioUrl) setupPlayer(card, audioUrl, paras, paraEls);
+  if (audioUrl) setupPlayer(card, audioUrl, item.duration, paras, paraEls);
 
   const copyBtn = $('.copy', card);
   copyBtn.addEventListener('click', async () => {
@@ -437,12 +482,14 @@ function renderResult(item, { audioUrl = null, onRemove }) {
 // Reproductor: sigue la lectura resaltando el párrafo y permite saltar con un clic.
 const players = new Set();
 
-function setupPlayer(card, url, paras, paraEls) {
+function setupPlayer(card, url, duration, paras, paraEls) {
   const player = $('.player', card);
   const playBtn = $('.play', card);
   const seek = $('.seek', card);
   const time = $('.time', card);
   const audio = new Audio(url);
+  // Las grabaciones WebM no traen duración en el archivo: usamos la del audio decodificado.
+  const total = () => (isFinite(audio.duration) && audio.duration > 0 ? audio.duration : duration);
   player.hidden = false;
 
   const setPlayIcon = () => {
@@ -464,7 +511,7 @@ function setupPlayer(card, url, paras, paraEls) {
   let active = -1;
   audio.addEventListener('timeupdate', () => {
     const t = audio.currentTime;
-    if (audio.duration) seek.value = String(Math.round((t / audio.duration) * 1000));
+    seek.value = String(Math.round((t / total()) * 1000));
     time.textContent = clock(t);
     let idx = -1;
     for (let i = 0; i < paras.length && paras[i].start <= t + 0.05; i++) idx = i;
@@ -476,7 +523,7 @@ function setupPlayer(card, url, paras, paraEls) {
     }
   });
   seek.addEventListener('input', () => {
-    if (audio.duration) audio.currentTime = (Number(seek.value) / 1000) * audio.duration;
+    audio.currentTime = (Number(seek.value) / 1000) * total();
   });
 
   card.addEventListener('dispose', () => {
@@ -580,8 +627,213 @@ function showView(view) {
   }
 }
 
+// ---------- Almacenamiento de modelos ----------
+// Los modelos viven en OPFS (ver model-store.js).
+async function renderStorage() {
+  const usage = await listModels();
+  const rows = [...usage].map(([id, size]) => {
+    const li = document.createElement('li');
+    const name = document.createElement('span');
+    name.textContent = MODELS[id] ?? id;
+    const sz = document.createElement('span');
+    sz.className = 'size';
+    sz.textContent = formatSize(size);
+    const del = document.createElement('button');
+    del.className = 'icon-btn sm';
+    del.title = `Borrar el modelo ${MODELS[id] ?? id}`;
+    del.innerHTML = icon('trash');
+    del.addEventListener('click', () => deleteModel(id));
+    li.append(name, sz, del);
+    return li;
+  });
+  if (!rows.length) {
+    const li = document.createElement('li');
+    li.className = 'none';
+    li.textContent = 'No hay modelos descargados.';
+    rows.push(li);
+  }
+  els.modelList.replaceChildren(...rows);
+  els.clearModels.disabled = usage.size === 0;
+
+  const total = [...usage.values()].reduce((a, b) => a + b, 0);
+  els.storageTotal.textContent = total ? `${formatSize(total)} en uso` : '';
+}
+
+function formatSize(bytes) {
+  if (bytes >= 1e9) return `${(bytes / 1e9).toLocaleString('es-AR', { maximumFractionDigits: 1 })} GB`;
+  return `${Math.max(1, Math.round(bytes / 1e6))} MB`;
+}
+
+// Liberar el modelo en memoria antes de borrar sus archivos.
+function releaseEngine() {
+  if (worker) worker.terminate();
+  worker = null;
+  loadedModel = null;
+  els.engine.textContent = 'Motor sin cargar';
+  els.engineDot.className = 'dot';
+}
+
+async function deleteModel(id) {
+  if (busy) return toast('Esperá a que termine la transcripción');
+  if (loadedModel === id) releaseEngine();
+  await removeModel(id);
+  toast(`Modelo ${MODELS[id] ?? id} borrado`);
+  renderStorage();
+}
+
+// Botón destructivo en dos pasos: el primer clic pide confirmación.
+function confirmButton(btn, action) {
+  const label = btn.innerHTML;
+  let timer;
+  btn.addEventListener('click', async () => {
+    if (!btn.classList.contains('confirm')) {
+      btn.classList.add('confirm');
+      btn.textContent = '¿Seguro? Tocá de nuevo';
+      timer = setTimeout(reset, 3000);
+      return;
+    }
+    reset();
+    await action();
+  });
+  function reset() {
+    clearTimeout(timer);
+    btn.classList.remove('confirm');
+    btn.innerHTML = label;
+  }
+}
+
+confirmButton(els.clearModels, async () => {
+  if (busy) return toast('Esperá a que termine la transcripción');
+  releaseEngine();
+  await clearModels();
+  toast('Modelos borrados');
+  renderStorage();
+});
+
+confirmButton(els.clearHistory, async () => {
+  await store.set('history', []);
+  toast('Historial borrado');
+});
+
+// ---------- Grabación de la pestaña ----------
+const LEVEL_BARS = 40;
+let rec = null;
+
+function callbackToPromise(fn) {
+  return new Promise((resolve, reject) =>
+    fn((value) => (chrome.runtime.lastError ? reject(new Error(chrome.runtime.lastError.message)) : resolve(value))),
+  );
+}
+
+async function getTabStream() {
+  if (typeof chrome !== 'undefined' && chrome.tabCapture?.getMediaStreamId) {
+    const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+    const streamId = await callbackToPromise((cb) => chrome.tabCapture.getMediaStreamId({ targetTabId: tab?.id }, cb));
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: { mandatory: { chromeMediaSource: 'tab', chromeMediaSourceId: streamId } },
+      video: false,
+    });
+    // Capturar la pestaña la silencia: reenviamos el sonido a los parlantes.
+    return { stream, playback: true };
+  }
+  // Fuera de la extensión (el panel abierto como página): compartir una pestaña con su audio.
+  const shared = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+  shared.getVideoTracks().forEach((t) => t.stop());
+  if (!shared.getAudioTracks().length) throw new Error('No se compartió audio. Marcá "Compartir audio de la pestaña".');
+  return { stream: new MediaStream(shared.getAudioTracks()), playback: false };
+}
+
+function friendlyCaptureError(err) {
+  const msg = err?.message || '';
+  if (/invoked|activeTab|permission/i.test(msg)) {
+    return 'Chrome solo deja grabar la pestaña donde abriste el panel. Cerralo y volvé a abrirlo desde el ícono de la extensión estando en esa pestaña.';
+  }
+  if (/active stream/i.test(msg)) return 'Esta pestaña ya se está grabando.';
+  if (/chrome:\/\/|webstore|Chrome pages/i.test(msg)) return 'Chrome no permite grabar sus páginas internas ni la Web Store.';
+  if (err?.name === 'NotAllowedError') return 'Se canceló el permiso para grabar.';
+  return msg || 'No se pudo grabar la pestaña.';
+}
+
+async function startRecording() {
+  let capture;
+  try {
+    capture = await getTabStream();
+  } catch (err) {
+    console.error(err);
+    renderError('Grabación de pestaña', friendlyCaptureError(err));
+    return;
+  }
+  const { stream, playback } = capture;
+
+  const ctx = new AudioContext();
+  const source = ctx.createMediaStreamSource(stream);
+  if (playback) source.connect(ctx.destination);
+  const analyser = ctx.createAnalyser();
+  analyser.fftSize = 1024;
+  source.connect(analyser);
+
+  const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : '';
+  const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+  const chunks = [];
+  recorder.addEventListener('dataavailable', (e) => e.data.size && chunks.push(e.data));
+  recorder.start(1000);
+
+  rec = { stream, ctx, recorder, chunks, started: Date.now(), timer: 0, meter: 0 };
+  // Si se cierra la pestaña o se corta la captura, nos quedamos con lo grabado.
+  stream.getAudioTracks()[0]?.addEventListener('ended', () => stopRecording(true));
+
+  els.record.hidden = true;
+  els.recorder.hidden = false;
+  els.recLevel.replaceChildren(...Array.from({ length: LEVEL_BARS }, () => document.createElement('i')));
+  const bars = [...els.recLevel.children];
+  const levels = new Array(LEVEL_BARS).fill(0);
+  const buf = new Float32Array(analyser.fftSize);
+  rec.meter = setInterval(() => {
+    analyser.getFloatTimeDomainData(buf);
+    let sum = 0;
+    for (const v of buf) sum += v * v;
+    levels.shift();
+    levels.push(Math.min(1, Math.sqrt(sum / buf.length) * 4));
+    bars.forEach((b, i) => (b.style.height = `${Math.max(2, levels[i] * 28)}px`));
+  }, 70);
+  const updateTime = () => (els.recTime.textContent = clock((Date.now() - rec.started) / 1000));
+  updateTime();
+  rec.timer = setInterval(updateTime, 250);
+}
+
+async function stopRecording(keep) {
+  if (!rec) return;
+  const r = rec;
+  rec = null;
+  clearInterval(r.meter);
+  clearInterval(r.timer);
+  await new Promise((resolve) => {
+    if (r.recorder.state === 'inactive') return resolve();
+    r.recorder.addEventListener('stop', resolve, { once: true });
+    r.recorder.stop();
+  });
+  r.stream.getTracks().forEach((t) => t.stop());
+  r.ctx.close();
+  els.recorder.hidden = true;
+  els.record.hidden = false;
+
+  if (!keep) return toast('Grabación descartada');
+  const seconds = (Date.now() - r.started) / 1000;
+  if (seconds < 1 || !r.chunks.length) return toast('La grabación fue demasiado corta');
+  const type = r.recorder.mimeType || 'audio/webm';
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  const name = `Pestaña ${pad(d.getDate())}-${pad(d.getMonth() + 1)} ${pad(d.getHours())}.${pad(d.getMinutes())}.webm`;
+  enqueue([new File([new Blob(r.chunks, { type })], name, { type })]);
+}
+
 // ---------- Eventos ----------
 hydrateIcons();
+checkMaxSupport();
+
+els.record.addEventListener('click', startRecording);
+els.recStop.addEventListener('click', () => stopRecording(true));
+els.recDiscard.addEventListener('click', () => stopRecording(false));
 
 els.openSettings.addEventListener('click', () => toggleSettings());
 els.summary.addEventListener('click', () => toggleSettings(true));
@@ -622,7 +874,7 @@ els.cancel.addEventListener('click', () => {
   const [lang, model] = await Promise.all([store.get('language', null), store.get('model', null)]);
   if (lang != null) els.language.value = lang;
   const radio = model && $(`input[name="model"][value="${model}"]`);
-  if (radio) radio.checked = true;
+  if (radio && !radio.disabled) radio.checked = true;
   updateSummary();
 })();
 els.language.addEventListener('change', () => {
